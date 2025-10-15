@@ -1,5 +1,10 @@
-import App from "./App";
+import { useEffect } from "react";
 
-export default function Home() {
-  return <App />;
-}
+useEffect(() => {
+  // erster Seitenaufruf
+  fetch("/api/audit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event: "visit" }),
+  });
+}, []);
