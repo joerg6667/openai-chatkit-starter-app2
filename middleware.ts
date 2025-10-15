@@ -1,23 +1,44 @@
-import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 export const config = {
   matcher: ["/((?!_next/|favicon.ico|robots.txt|sitemap.xml).*)"],
 };
 
-export default function middleware(req: NextRequest) {
-  const u = process.env.BASIC_AUTH_USER;
-  const p = process.env.BASIC_AUTH_PASS;
-  if (!u || !p) return NextResponse.next();
+const COOKIE = "fm_invite"; // Cookie-Name
 
-  const auth = req.headers.get("authorization");
-  if (auth?.startsWith("Basic ")) {
-    const b64 = auth.split(" ")[1]!;
-    const [user, pass] = atob(b64).split(":");
-    if (user === u && pass === p) return NextResponse.next();
+function parseAllowlist() {
+  // ENV: "alice=ABC123,bob=XYZ789"
+  const raw = process.env.INVITE_TOKENS || "";
+  return raw.split(",")
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(p => p.split("=")) // [name, token]
+    .filter(([n, t]) => n && t) as [string, string][];
+}
+
+export default function middleware(req: NextRequest) {
+  const url = new URL(req.url);
+  const tokenFromUrl = url.searchParams.get("t");
+  const cookieToken = req.cookies.get(COOKIE)?.value;
+
+  const list = parseAllowlist();
+  const isValid = (t?: string) => !!t && list.some(([_, tok]) => tok === t);
+
+  // 1) Token im URL → Cookie setzen → Query aufräumen
+  if (tokenFromUrl && isValid(tokenFromUrl)) {
+    const res = NextResponse.redirect(new URL(url.pathname, url.origin));
+    res.cookies.set(COOKIE, tokenFromUrl, {
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 30, // 30 Tage
+      secure: true,
+    });
+    return res;
   }
-  return new NextResponse("Auth required", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="FM-Coach Test"' },
-  });
+
+  // 2) Cookie gültig?
+  if (isValid(cookieToken)) return NextResponse.next();
+
+  // 3) Kein gültiger Token → Login-Hinweis
+  return NextResponse.redirect(new URL("/login", req.url));
 }
